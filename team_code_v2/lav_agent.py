@@ -25,7 +25,8 @@ from planner import RoutePlanner
 from waypointer import Waypointer
 
 def get_entry_point():
-    return 'LAVAgent'
+    # return 'LAVAgent'
+    return 'LavAgent'
 
 NUM_REPEAT = 4
 GAP = NUM_REPEAT + 1
@@ -34,7 +35,10 @@ PIXELS_PER_METER = 4
 
 CAMERA_YAWS = [-60,0,60]
 
-class LAVAgent(AutonomousAgent):
+class LavAgent(AutonomousAgent):
+    def __init__(self, carla_host="localhost", carla_port=2000, debug=False):
+        super().__init__(carla_host, carla_port, debug)
+
     def sensors(self):
         sensors = [
             {'type': 'sensor.speedometer', 'id': 'EGO'},
@@ -334,7 +338,10 @@ class LAVAgent(AutonomousAgent):
 
         self.ekf.step(spd, steer, *gps[:2], compass-math.pi/2)
 
-        if float(pred_bra) > 0.1:
+        print('pred_bra ', pred_bra)
+
+        # if float(pred_bra) > 0.1:
+        if float(pred_bra) > 0.5:
             throt, brake = 0, 1
         elif self.plan_collide(ego_plan_locs, other_cast_locs, other_cast_cmds):
             throt, brake = 0, 1
@@ -351,8 +358,12 @@ class LAVAgent(AutonomousAgent):
         viz = self.visualize(rgb, tel_rgb, lidar_points, float(pred_bra), to_numpy(torch.sigmoid(pred_bev[0])), ego_plan_locs, other_cast_locs, other_cast_cmds, det, [-wx, -wy], cmd_value, spd, steer, throt, brake)
         self.vizs.append(viz)
 
+        print('len vizs {}'.format(len(self.vizs)))
+
         if len(self.vizs) >= 12000:
             self.flush_data()
+
+        print('steer {}, throttle {}, brake {}'.format(steer, throt, brake))
 
         return carla.VehicleControl(steer=steer, throttle=throt, brake=brake)
 
