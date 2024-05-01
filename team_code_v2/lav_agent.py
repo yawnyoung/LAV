@@ -78,7 +78,7 @@ class LavAgent(AutonomousAgent):
         self.waypointer = None
         self.planner    = None
 
-        wandb.init(project='lav_eval')
+        # wandb.init(project='lav_eval')
 
         # Setup models
         self.lidar_model = LiDARModel(
@@ -338,10 +338,10 @@ class LavAgent(AutonomousAgent):
 
         self.ekf.step(spd, steer, *gps[:2], compass-math.pi/2)
 
-        print('pred_bra ', pred_bra)
+        # print('pred_bra ', pred_bra)
 
         # if float(pred_bra) > 0.1:
-        if float(pred_bra) > 0.5:
+        if float(pred_bra) > 1.1:
             throt, brake = 0, 1
         elif self.plan_collide(ego_plan_locs, other_cast_locs, other_cast_cmds):
             throt, brake = 0, 1
@@ -358,12 +358,10 @@ class LavAgent(AutonomousAgent):
         viz = self.visualize(rgb, tel_rgb, lidar_points, float(pred_bra), to_numpy(torch.sigmoid(pred_bev[0])), ego_plan_locs, other_cast_locs, other_cast_cmds, det, [-wx, -wy], cmd_value, spd, steer, throt, brake)
         self.vizs.append(viz)
 
-        print('len vizs {}'.format(len(self.vizs)))
-
         if len(self.vizs) >= 12000:
             self.flush_data()
 
-        print('steer {}, throttle {}, brake {}'.format(steer, throt, brake))
+        # print('steer {}, throttle {}, brake {}'.format(steer, throt, brake))
 
         return carla.VehicleControl(steer=steer, throttle=throt, brake=brake)
 
