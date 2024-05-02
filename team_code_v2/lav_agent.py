@@ -341,7 +341,7 @@ class LavAgent(AutonomousAgent):
         # print('pred_bra ', pred_bra)
 
         # if float(pred_bra) > 0.1:
-        if float(pred_bra) > 1.1:
+        if float(pred_bra) > 0.5:
             throt, brake = 0, 1
         elif self.plan_collide(ego_plan_locs, other_cast_locs, other_cast_cmds):
             throt, brake = 0, 1
@@ -358,7 +358,7 @@ class LavAgent(AutonomousAgent):
         viz = self.visualize(rgb, tel_rgb, lidar_points, float(pred_bra), to_numpy(torch.sigmoid(pred_bev[0])), ego_plan_locs, other_cast_locs, other_cast_cmds, det, [-wx, -wy], cmd_value, spd, steer, throt, brake)
         self.vizs.append(viz)
 
-        if len(self.vizs) >= 80:
+        if len(self.vizs) >= 200.:
             self.flush_data()
 
         # print('steer {}, throttle {}, brake {}'.format(steer, throt, brake))
