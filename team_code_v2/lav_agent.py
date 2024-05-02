@@ -78,7 +78,7 @@ class LavAgent(AutonomousAgent):
         self.waypointer = None
         self.planner    = None
 
-        # wandb.init(project='lav_eval')
+        wandb.init(project='lav_eval')
 
         # Setup models
         self.lidar_model = LiDARModel(
@@ -358,7 +358,7 @@ class LavAgent(AutonomousAgent):
         viz = self.visualize(rgb, tel_rgb, lidar_points, float(pred_bra), to_numpy(torch.sigmoid(pred_bev[0])), ego_plan_locs, other_cast_locs, other_cast_cmds, det, [-wx, -wy], cmd_value, spd, steer, throt, brake)
         self.vizs.append(viz)
 
-        if len(self.vizs) >= 12000:
+        if len(self.vizs) >= 80:
             self.flush_data()
 
         # print('steer {}, throttle {}, brake {}'.format(steer, throt, brake))
