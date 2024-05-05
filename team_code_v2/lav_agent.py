@@ -14,15 +14,52 @@ from torch.nn import functional as F
 
 from leaderboard.autoagents.autonomous_agent import AutonomousAgent, Track
 
-from models.lidar import LiDARModel
-from models.uniplanner import UniPlanner
-from models.bev_planner import BEVPlanner
-from models.rgb import RGBSegmentationModel, RGBBrakePredictionModel
-from pid import PIDController
-from ekf import EKF, move_lidar_points
-from point_painting import CoordConverter, point_painting
-from planner import RoutePlanner
-from waypointer import Waypointer
+from copy import deepcopy
+
+try:
+    from models.lidar import LiDARModel
+except ImportError:
+    from team_code_v2.models.lidar import LiDARModel
+
+try:
+    from models.uniplanner import UniPlanner
+except ImportError:
+    from team_code_v2.models.uniplanner import UniPlanner
+
+try:
+    from models.bev_planner import BEVPlanner
+except ImportError:
+    from team_code_v2.models.bev_planner import BEVPlanner
+
+try:
+    from models.rgb import RGBSegmentationModel, RGBBrakePredictionModel
+except ImportError:
+    from team_code_v2.models.rgb import RGBSegmentationModel, RGBBrakePredictionModel
+
+try:
+    from pid import PIDController
+except ImportError:
+    from team_code_v2.pid import PIDController
+
+try:
+    from ekf import EKF, move_lidar_points
+except ImportError:
+    from team_code_v2.ekf import EKF, move_lidar_points
+
+try:
+    from point_painting import CoordConverter, point_painting
+except ImportError:
+    from team_code_v2.point_painting import CoordConverter, point_painting
+
+try:
+    from planner import RoutePlanner
+except ImportError:
+    from team_code_v2.planner import RoutePlanner
+
+try:
+    from waypointer import Waypointer
+except ImportError:
+    from team_code_v2.waypointer import Waypointer
 
 def get_entry_point():
     # return 'LAVAgent'
@@ -36,15 +73,19 @@ PIXELS_PER_METER = 4
 CAMERA_YAWS = [-60,0,60]
 
 class LavAgent(AutonomousAgent):
-    def __init__(self, carla_host="localhost", carla_port=2000, debug=False):
-        super().__init__(carla_host, carla_port, debug)
+    # def __init__(self, carla_host="localhost", carla_port=2000, debug=False):
+    #     super().__init__(carla_host, carla_port, debug)
 
     def sensors(self):
+
         sensors = [
             {'type': 'sensor.speedometer', 'id': 'EGO'},
+            {'type': 'sensor.collision', 'id': 'COLLISION'},
+            {'type': 'sensor.map', 'id': 'LBL'},
+            {'type': 'sensor.pretty_map', 'id': 'BEV'},
+            {'type': 'sensor.objects', 'id': 'OBJ'},
             {'type': 'sensor.other.gnss', 'x': 0., 'y': 0., 'z': self.camera_z, 'id': 'GPS'},
             {'type': 'sensor.other.imu',  'x': 0., 'y': 0., 'z': self.camera_z, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,'sensor_tick': 0.05, 'id': 'IMU'},
-            
         ]
 
         # Add LiDAR
@@ -57,9 +98,13 @@ class LavAgent(AutonomousAgent):
         for i, yaw in enumerate(CAMERA_YAWS):
             sensors.append({'type': 'sensor.camera.rgb', 'x': self.camera_x, 'y': 0.0, 'z': self.camera_z, 'roll': 0.0, 'pitch': 0.0, 'yaw': yaw,
             'width': 256, 'height': 288, 'fov': 64, 'id': f'RGB_{i}'})
+            sensors.append({'type': 'sensor.camera.semantic_segmentation', 'x': self.camera_x, 'y': 0.0, 'z': self.camera_z, 'roll': 0.0, 'pitch': 0.0, 'yaw': yaw,
+            'width': 256, 'height': 288, 'fov': 64, 'id': f'SEG_{i}'})
 
         sensors.append({'type': 'sensor.camera.rgb', 'x': self.camera_x, 'y': 0.0, 'z': self.camera_z, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,
             'width': 480, 'height': 288, 'fov': 40, 'id': 'TEL_RGB'})
+        sensors.append({'type': 'sensor.camera.semantic_segmentation', 'x': self.camera_x, 'y': 0.0, 'z': self.camera_z, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0,
+            'width': 480, 'height': 288, 'fov': 40, 'id': 'TEL_SEG'})
 
         return sensors
 
@@ -77,6 +122,48 @@ class LavAgent(AutonomousAgent):
 
         self.waypointer = None
         self.planner    = None
+
+        # RGB camera
+        self.rgbs = []
+        self.tel_rgbs = []
+        # semantic segmentation labels
+        self.sems = []
+        self.tel_sems = []
+        
+        # LiDAR points
+        self.lids = []
+        # BEV GT Maps
+        self.maps = []
+
+        # GNSS readings
+        self.gnsses = []
+        self.gnss = []
+
+        # IMU readings
+        self.lin_accs = []
+        self.ang_vels = []
+        self.lin_acc = []
+        self.ang_vel = []
+        
+        # Actor ids 
+        self.ids  = []
+        # Actor locations (ego's always first and same below)
+        self.locs = []
+        # Actor orientations
+        self.oris = []
+        # Actor bounding boxes
+        self.bbox = []
+        # Actor types (pedestrian, walker)
+        self.type = []
+        # Actor speeds
+        self.spds = []
+
+        # Ego cmds
+        self.cmds = []
+        # Ego target waypoints
+        self.nxps = []
+        # Ego brakes
+        self.bras = []
 
         wandb.init(project='lav_eval')
 
@@ -241,17 +328,33 @@ class LavAgent(AutonomousAgent):
 
         # Paint the lidars
         rgbs = []
+        sems = []
 
         for i in range(len(CAMERA_YAWS)):
             _, rgb = input_data.get(f'RGB_{i}')
             rgbs.append(rgb[...,:3][...,::-1])
+            _, sem = input_data.get(f'SEG_{i}')
+            sems.append(sem[...,:2][...,::-1])
 
         rgb = np.concatenate(rgbs, axis=1)
         all_rgb = np.stack(rgbs, axis=0)
 
+        _, lbl = input_data.get('LBL')
+        _, bev = input_data.get('BEV')
+        _, col = input_data.get('COLLISION')
+        _, obj = input_data.get('OBJ')
+        _, gps = input_data.get('GPS')
+        _, imu = input_data.get('IMU')
+
+        # todo
+
         _, tel_rgb = input_data.get('TEL_RGB')
         tel_rgb = tel_rgb[...,:3][...,::-1].copy()
         tel_rgb = tel_rgb[:-self.crop_tel_bottom]
+
+        _, tel_sem = input_data.get('TEL_SEG')
+        tel_sem = tel_sem[...,:2][...,::-1].copy()
+        tel_sem = tel_sem[:-self.crop_tel_bottom]
 
         all_rgbs = torch.tensor(all_rgb).permute(0,3,1,2).float().to(self.device)
         pred_sem = to_numpy(torch.softmax(self.seg_model(all_rgbs), dim=1))
@@ -355,6 +458,34 @@ class LavAgent(AutonomousAgent):
             throt, brake = max(0.4, throt), 0
             self.force_move -= 1
 
+        # save data
+        if self.stop_counter < 100 and not np.isnan([wx,wy]).any():
+            self.rgbs.append(rgbs)
+            self.tel_rgbs.append(tel_rgb)
+            self.sems.append(sems)
+            self.tel_sems.append(tel_sem)
+            self.lids.append(lidar)
+            self.maps.append(bev)
+
+            self.gnsses.append(deepcopy(self.gnss))
+            self.lin_accs.append(deepcopy(self.lin_acc))
+            self.ang_vels.append(deepcopy(self.ang_vel))
+
+            self.gnss.clear()
+            self.lin_acc.clear()
+            self.ang_vel.clear()
+
+            self.ids.append(np.array(obj.get('id')))
+            self.locs.append(np.array(obj.get('loc')))
+            self.oris.append(np.array(obj.get('ori')))
+            self.bbox.append(np.array(obj.get('bbox')))
+            self.type.append(np.array(obj.get('type')))
+            self.spds.append(np.array(obj.get('spd')))
+
+            self.cmds.append(cmd_value)
+            self.nxps.append(np.array([wx, wy]))
+            self.bras.append(np.array([control.brake]))
+
         viz = self.visualize(rgb, tel_rgb, lidar_points, float(pred_bra), to_numpy(torch.sigmoid(pred_bev[0])), ego_plan_locs, other_cast_locs, other_cast_cmds, det, [-wx, -wy], cmd_value, spd, steer, throt, brake)
         self.vizs.append(viz)
 
@@ -363,7 +494,8 @@ class LavAgent(AutonomousAgent):
 
         # print('steer {}, throttle {}, brake {}'.format(steer, throt, brake))
 
-        return carla.VehicleControl(steer=steer, throttle=throt, brake=brake)
+        # return carla.VehicleControl(steer=steer, throttle=throt, brake=brake)
+        return carla.VehicleControl(steer=steer, throttle=1.0, brake=0.0)
 
 
     def get_stacked_lidar(self):
